@@ -1,0 +1,284 @@
+# Claude Bridge System - Prometheus Configuration
+# Monitoring and alerting configuration for production deployment
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+rule_files:
+  - "alert_rules.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+scrape_configs:
+  # Claude Bridge System main application
+  - job_name: 'claude-bridge'
+    static_configs:
+      - targets: ['claude-bridge:9090']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    honor_labels: true
+    
+    # Additional labels for service identification
+    static_configs:
+      - targets: ['claude-bridge:9090']
+        labels:
+          service: 'claude-bridge'
+          environment: 'production'
+          component: 'main-service'
+
+  # PostgreSQL database metrics
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres_exporter:9187']
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['postgres_exporter:9187']
+        labels:
+          service: 'postgres'
+          environment: 'production'
+          component: 'database'
+
+  # Redis metrics
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis_exporter:9121']
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['redis_exporter:9121']
+        labels:
+          service: 'redis'
+          environment: 'production'
+          component: 'cache'
+
+  # Nginx reverse proxy metrics
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx_exporter:9113']
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['nginx_exporter:9113']
+        labels:
+          service: 'nginx'
+          environment: 'production'
+          component: 'proxy'
+
+  # Node exporter for system metrics
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node_exporter:9100']
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['node_exporter:9100']
+        labels:
+          service: 'node'
+          environment: 'production'
+          component: 'system'
+
+  # cAdvisor for container metrics
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['cadvisor:8080']
+        labels:
+          service: 'cadvisor'
+          environment: 'production'
+          component: 'containers'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+          environment: 'production'
+          component: 'monitoring'
+
+  # Grafana metrics
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 60s
+    static_configs:
+      - targets: ['grafana:3000']
+        labels:
+          service: 'grafana'
+          environment: 'production'
+          component: 'visualization'
+
+  # Custom application-specific endpoints
+  - job_name: 'claude-bridge-custom'
+    static_configs:
+      - targets: ['claude-bridge:8080']
+    metrics_path: '/api/metrics/custom'
+    scrape_interval: 60s
+    params:
+      format: ['prometheus']
+    static_configs:
+      - targets: ['claude-bridge:8080']
+        labels:
+          service: 'claude-bridge'
+          environment: 'production'
+          component: 'custom-metrics'
+
+  # Health check endpoints
+  - job_name: 'health-checks'
+    static_configs:
+      - targets: 
+        - 'claude-bridge:8080'
+        - 'postgres:5432'
+        - 'redis:6379'
+    metrics_path: '/health'
+    scrape_interval: 30s
+    scrape_timeout: 5s
+    
+    # Custom health check configuration
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'up'
+        target_label: '__name__'
+        replacement: 'service_health_status'
+
+# Recording rules for common queries
+recording_rules:
+  - name: claude_bridge.rules
+    rules:
+    # Request rate rules
+    - record: claude_bridge:request_rate_5m
+      expr: rate(http_requests_total[5m])
+    
+    - record: claude_bridge:request_rate_1h
+      expr: rate(http_requests_total[1h])
+    
+    # Error rate rules
+    - record: claude_bridge:error_rate_5m
+      expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])
+    
+    # Response time rules
+    - record: claude_bridge:response_time_95th_5m
+      expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+    
+    - record: claude_bridge:response_time_99th_5m
+      expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))
+    
+    # Resource utilization rules
+    - record: claude_bridge:cpu_usage_5m
+      expr: rate(process_cpu_seconds_total[5m]) * 100
+    
+    - record: claude_bridge:memory_usage_mb
+      expr: process_resident_memory_bytes / 1024 / 1024
+    
+    # Database connection rules
+    - record: claude_bridge:db_connections_active
+      expr: pg_stat_activity_count{state="active"}
+    
+    - record: claude_bridge:db_connections_idle
+      expr: pg_stat_activity_count{state="idle"}
+    
+    # Cache hit rate rules
+    - record: claude_bridge:cache_hit_rate_5m
+      expr: rate(cache_hits_total[5m]) / (rate(cache_hits_total[5m]) + rate(cache_misses_total[5m]))
+
+# Alerting rules configuration
+alert_rules:
+  - name: claude_bridge.alerts
+    rules:
+    # Service availability alerts
+    - alert: ServiceDown
+      expr: up == 0
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Service {{ $labels.job }} is down"
+        description: "Service {{ $labels.job }} has been down for more than 1 minute."
+    
+    # High error rate alert
+    - alert: HighErrorRate
+      expr: claude_bridge:error_rate_5m > 0.05
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High error rate detected"
+        description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+    
+    # High response time alert
+    - alert: HighResponseTime
+      expr: claude_bridge:response_time_95th_5m > 1.0
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High response time detected"
+        description: "95th percentile response time is {{ $value }}s over the last 5 minutes."
+    
+    # Resource utilization alerts
+    - alert: HighCPUUsage
+      expr: claude_bridge:cpu_usage_5m > 80
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High CPU usage detected"
+        description: "CPU usage is {{ $value }}% over the last 5 minutes."
+    
+    - alert: HighMemoryUsage
+      expr: claude_bridge:memory_usage_mb > 1024
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High memory usage detected"
+        description: "Memory usage is {{ $value }}MB."
+    
+    # Database alerts
+    - alert: DatabaseConnectionHigh
+      expr: claude_bridge:db_connections_active > 50
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High database connection count"
+        description: "Active database connections: {{ $value }}"
+    
+    - alert: LowCacheHitRate
+      expr: claude_bridge:cache_hit_rate_5m < 0.8
+      for: 10m
+      labels:
+        severity: info
+      annotations:
+        summary: "Low cache hit rate"
+        description: "Cache hit rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+    
+    # Disk space alerts
+    - alert: DiskSpaceHigh
+      expr: (node_filesystem_size_bytes{fstype!="tmpfs"} - node_filesystem_free_bytes{fstype!="tmpfs"}) / node_filesystem_size_bytes{fstype!="tmpfs"} > 0.8
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High disk usage detected"
+        description: "Disk usage is above 80% on {{ $labels.device }}"
+    
+    - alert: DiskSpaceCritical
+      expr: (node_filesystem_size_bytes{fstype!="tmpfs"} - node_filesystem_free_bytes{fstype!="tmpfs"}) / node_filesystem_size_bytes{fstype!="tmpfs"} > 0.9
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Critical disk usage detected"
+        description: "Disk usage is above 90% on {{ $labels.device }}"

@@ -19,6 +19,7 @@ from .commands import (
     status_command,
     clean_command
 )
+from .performance_commands import register_performance_commands
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -891,6 +892,339 @@ def mis_detect(ctx, text):
         click.echo(f"Error: MIS検出に失敗しました: {e}", err=True)
         sys.exit(1)
 
+
+# 監視システムコマンドグループ
+@main.group()
+def monitor():
+    """System monitoring and metrics commands"""
+    pass
+
+
+@monitor.command('start-metrics')
+@click.option('--interval', default=60, help='Collection interval in seconds')
+@click.option('--duration', default=3600, help='Collection duration in seconds')
+@click.pass_context
+def monitor_start_metrics(ctx, interval: int, duration: int):
+    """Start metrics collection"""
+    try:
+        from ..monitoring import MetricsCollector
+        
+        collector = MetricsCollector(collection_interval=interval)
+        collector.start_collection()
+        
+        click.echo(f"📊 Metrics collection started (interval: {interval}s)")
+        click.echo(f"Collection will run for {duration}s. Press Ctrl+C to stop.")
+        
+        import time
+        try:
+            time.sleep(duration)
+        except KeyboardInterrupt:
+            click.echo("\n⏹️  Collection interrupted by user")
+        
+        collector.stop_collection()
+        click.echo("📊 Metrics collection stopped")
+        
+    except Exception as e:
+        click.echo(f"❌ Error starting metrics collection: {e}", err=True)
+        sys.exit(1)
+
+
+@monitor.command('health')
+@click.option('--component', help='Check specific component')
+@click.option('--output', '-o', type=click.Path(), help='Output file for results')
+@click.pass_context
+def monitor_health(ctx, component: str, output):
+    """Run system health check"""
+    try:
+        from ..monitoring import HealthChecker
+        import asyncio
+        import json
+        
+        checker = HealthChecker()
+        
+        if component:
+            # 特定コンポーネントのみチェック
+            click.echo(f"🔍 Checking component: {component}")
+            health = checker.check_component(component)
+            
+            if health is None:
+                click.echo(f"❌ Component '{component}' not found")
+                available = list(checker.health_checks.keys())
+                click.echo(f"Available components: {', '.join(available)}")
+                sys.exit(1)
+            
+            status_emoji = {
+                "healthy": "✅",
+                "degraded": "⚠️",
+                "unhealthy": "❌",
+                "unknown": "❓"
+            }
+            
+            emoji = status_emoji.get(health.status.value, "❓")
+            click.echo(f"{emoji} {health.name}: {health.message}")
+            if health.response_time_ms > 0:
+                click.echo(f"   Response time: {health.response_time_ms:.1f}ms")
+            
+            if health.details and ctx.obj['verbose']:
+                click.echo("   Details:")
+                for key, value in health.details.items():
+                    click.echo(f"     {key}: {value}")
+        
+        else:
+            # 全コンポーネントをチェック
+            click.echo("🔍 Running comprehensive health check...")
+            
+            # 非同期でヘルスチェック実行
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            try:
+                health = loop.run_until_complete(checker.check_all_components())
+            finally:
+                loop.close()
+            
+            # 結果表示
+            status_emoji = {
+                "healthy": "✅",
+                "degraded": "⚠️", 
+                "unhealthy": "❌",
+                "unknown": "❓"
+            }
+            
+            emoji = status_emoji.get(health.overall_status.value, "❓")
+            click.echo(f"\n{emoji} Overall Status: {health.overall_status.value.upper()}")
+            click.echo(f"🕐 Uptime: {health.uptime_seconds:.1f}s")
+            click.echo(f"📋 Components checked: {len(health.components)}")
+            
+            # コンポーネント詳細
+            click.echo("\n📊 Component Details:")
+            for component in health.components:
+                comp_emoji = status_emoji.get(component.status.value, "❓")
+                click.echo(f"  {comp_emoji} {component.name}: {component.message}")
+                if component.response_time_ms > 0:
+                    click.echo(f"    Response time: {component.response_time_ms:.1f}ms")
+            
+            # アラート
+            if health.alerts:
+                click.echo(f"\n🚨 Alerts ({len(health.alerts)}):")
+                for alert in health.alerts:
+                    severity_emoji = "🔴" if alert.get("severity") == "critical" else "🟡"
+                    click.echo(f"  {severity_emoji} {alert.get('message', 'No message')}")
+            
+            # システム情報
+            if health.system_info:
+                cpu = health.system_info.get('cpu_percent', 0)
+                memory_gb = health.system_info.get('memory_available_gb', 0)
+                disk_gb = health.system_info.get('disk_free_gb', 0)
+                
+                click.echo(f"\n💻 System Resources:")
+                click.echo(f"  CPU: {cpu:.1f}%")
+                click.echo(f"  Available Memory: {memory_gb:.1f}GB")
+                click.echo(f"  Free Disk: {disk_gb:.1f}GB")
+            
+            # 結果をファイルに出力
+            if output:
+                from dataclasses import asdict
+                with open(output, 'w', encoding='utf-8') as f:
+                    json.dump(asdict(health), f, ensure_ascii=False, indent=2)
+                click.echo(f"\n💾 Health check results saved to: {output}")
+        
+    except Exception as e:
+        click.echo(f"❌ Error running health check: {e}", err=True)
+        sys.exit(1)
+
+
+@monitor.command('performance')
+@click.option('--operation', help='Filter by operation name')
+@click.option('--limit', default=10, help='Number of entries to show')
+@click.option('--output', '-o', type=click.Path(), help='Output file for results')
+@click.pass_context
+def monitor_performance(ctx, operation: str, limit: int, output):
+    """Show performance statistics"""
+    try:
+        from ..monitoring import PerformanceMonitor
+        import json
+        
+        monitor = PerformanceMonitor()
+        
+        if operation:
+            # 特定操作の統計
+            stats = monitor.get_operation_stats(operation, limit=limit)
+            
+            if "error" in stats:
+                click.echo(f"❌ {stats['error']}")
+                return 1
+            
+            click.echo(f"📈 Performance Stats: {operation}")
+            click.echo(f"Total operations: {stats['total_operations']}")
+            click.echo(f"Success rate: {stats['success_rate']:.2%}")
+            click.echo(f"Average duration: {stats['avg_duration_ms']:.2f}ms")
+            click.echo(f"Min/Max duration: {stats['min_duration_ms']:.2f}ms / {stats['max_duration_ms']:.2f}ms")
+            click.echo(f"95th percentile: {stats['percentile_95_ms']:.2f}ms")
+            click.echo(f"Operations per second: {stats['operations_per_second']:.2f}")
+            
+            if output:
+                with open(output, 'w', encoding='utf-8') as f:
+                    json.dump(stats, f, ensure_ascii=False, indent=2)
+                click.echo(f"\n💾 Performance stats saved to: {output}")
+            
+        else:
+            # 全操作のサマリー
+            summary = monitor.get_all_operations_summary()
+            
+            click.echo(f"📈 Performance Summary")
+            click.echo(f"Total operations: {summary['total_operations']}")
+            click.echo(f"Unique operations: {summary['unique_operations']}")
+            
+            if summary.get('overall_stats'):
+                overall = summary['overall_stats']
+                click.echo(f"Overall success rate: {overall['overall_success_rate']:.2%}")
+                click.echo(f"Average duration: {overall['avg_duration_ms']:.2f}ms")
+            
+            if summary.get('operations'):
+                click.echo(f"\n📊 Top Operations:")
+                sorted_ops = sorted(
+                    summary['operations'].items(),
+                    key=lambda x: x[1]['total_ops'],
+                    reverse=True
+                )[:limit]
+                
+                for op_name, op_stats in sorted_ops:
+                    click.echo(f"  • {op_name}: {op_stats['total_ops']} ops, "
+                              f"{op_stats['success_rate']:.2%} success, "
+                              f"{op_stats['avg_duration_ms']:.2f}ms avg")
+            
+            if output:
+                with open(output, 'w', encoding='utf-8') as f:
+                    json.dump(summary, f, ensure_ascii=False, indent=2)
+                click.echo(f"\n💾 Performance summary saved to: {output}")
+        
+    except Exception as e:
+        click.echo(f"❌ Error getting performance stats: {e}", err=True)
+        sys.exit(1)
+
+
+@monitor.command('benchmark')
+@click.option('--name', required=True, help='Benchmark name')
+@click.option('--operation', required=True, 
+              type=click.Choice(['file_write', 'file_read', 'memory_allocation', 'cpu_calculation']),
+              help='Operation to benchmark')
+@click.option('--iterations', default=100, help='Number of iterations')
+@click.option('--concurrent/--sequential', default=False, help='Run concurrent benchmark')
+@click.option('--output', '-o', type=click.Path(), help='Output file for results')
+@click.pass_context
+def monitor_benchmark(ctx, name: str, operation: str, iterations: int, concurrent: bool, output):
+    """Run performance benchmark"""
+    try:
+        from ..monitoring import PerformanceMonitor
+        import asyncio
+        import json
+        from dataclasses import asdict
+        
+        monitor = PerformanceMonitor()
+        
+        # ベンチマーク対象の操作を定義
+        benchmark_operations = {
+            "file_write": lambda: Path("benchmark_test.txt").write_text("test"),
+            "file_read": lambda: Path("benchmark_test.txt").read_text() if Path("benchmark_test.txt").exists() else "",
+            "memory_allocation": lambda: [i for i in range(1000)],
+            "cpu_calculation": lambda: sum(i * i for i in range(1000))
+        }
+        
+        click.echo(f"🏃 Running benchmark: {name}")
+        click.echo(f"Operation: {operation}")
+        click.echo(f"Iterations: {iterations}")
+        click.echo(f"Mode: {'Concurrent' if concurrent else 'Sequential'}")
+        
+        # ベンチマーク実行
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            result = loop.run_until_complete(
+                monitor.run_benchmark(
+                    name=name,
+                    operation_func=benchmark_operations[operation],
+                    iterations=iterations,
+                    concurrent=concurrent
+                )
+            )
+        finally:
+            loop.close()
+        
+        # 結果表示
+        click.echo(f"\n📊 Benchmark Results: {name}")
+        click.echo(f"Total operations: {result.total_operations}")
+        click.echo(f"Successful: {result.successful_operations}")
+        click.echo(f"Failed: {result.failed_operations}")
+        click.echo(f"Success rate: {(result.successful_operations / result.total_operations):.2%}")
+        click.echo(f"Total time: {result.total_duration_ms:.2f}ms")
+        click.echo(f"Average time: {result.avg_duration_ms:.2f}ms")
+        click.echo(f"Min/Max time: {result.min_duration_ms:.2f}ms / {result.max_duration_ms:.2f}ms")
+        click.echo(f"95th percentile: {result.percentile_95_ms:.2f}ms")
+        click.echo(f"Operations per second: {result.operations_per_second:.2f}")
+        
+        # クリーンアップ
+        test_file = Path("benchmark_test.txt")
+        if test_file.exists():
+            test_file.unlink()
+        
+        # 結果をファイルに出力
+        if output:
+            with open(output, 'w', encoding='utf-8') as f:
+                json.dump(asdict(result), f, ensure_ascii=False, indent=2)
+            click.echo(f"\n💾 Benchmark results saved to: {output}")
+        
+    except Exception as e:
+        click.echo(f"❌ Error running benchmark: {e}", err=True)
+        sys.exit(1)
+
+
+@monitor.command('export')
+@click.option('--output', default='metrics_export.json', help='Output file path')
+@click.option('--format', default='json', type=click.Choice(['json', 'csv']), help='Export format')
+@click.option('--type', 'export_type', type=click.Choice(['metrics', 'performance', 'all']), 
+              default='all', help='Data type to export')
+@click.pass_context
+def monitor_export(ctx, output: str, format: str, export_type: str):
+    """Export monitoring data"""
+    try:
+        from ..monitoring import MetricsCollector, PerformanceMonitor
+        
+        output_path = Path(output)
+        success = False
+        
+        if export_type in ['metrics', 'all']:
+            collector = MetricsCollector()
+            success = collector.export_metrics(output_path, format)
+            
+            if success:
+                click.echo(f"✅ Metrics exported to {output_path}")
+        
+        if export_type in ['performance', 'all']:
+            # パフォーマンスデータの場合は別ファイル名
+            if export_type == 'performance':
+                perf_output = output_path
+            else:
+                perf_output = output_path.with_stem(f"{output_path.stem}_performance")
+            
+            monitor = PerformanceMonitor()
+            success = monitor.export_performance_data(perf_output, format)
+            
+            if success:
+                click.echo(f"✅ Performance data exported to {perf_output}")
+        
+        if not success:
+            click.echo(f"❌ Failed to export monitoring data")
+            sys.exit(1)
+            
+    except Exception as e:
+        click.echo(f"❌ Error exporting monitoring data: {e}", err=True)
+        sys.exit(1)
+
+
+# パフォーマンスコマンドを登録
+register_performance_commands(main)
 
 if __name__ == '__main__':
     main()

@@ -1,0 +1,304 @@
+# Claude Bridge System - Production Configuration
+# Production-optimized settings for enterprise deployment
+
+# Application Settings
+app:
+  name: "Claude Bridge System"
+  version: "1.0.0"
+  environment: "production"
+  debug: false
+  timezone: "UTC"
+
+# Server Configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+  secure_port: 8443
+  workers: 4
+  max_connections: 1000
+  keep_alive_timeout: 5
+  request_timeout: 30
+  graceful_shutdown_timeout: 30
+
+# Security Configuration
+security:
+  # JWT Configuration
+  jwt:
+    secret_key: "${JWT_SECRET}"
+    algorithm: "HS256"
+    expiry_hours: 24
+    refresh_expiry_days: 30
+  
+  # API Keys
+  api_keys:
+    secret: "${API_KEY_SECRET}"
+    expiry_days: 365
+  
+  # Encryption
+  encryption:
+    default_algorithm: "aes-256-gcm"
+    key: "${ENCRYPTION_KEY}"
+  
+  # TLS/SSL
+  tls:
+    cert_file: "${SSL_CERT_PATH}"
+    key_file: "${SSL_KEY_PATH}"
+    ca_file: "${SSL_CA_PATH}"
+    verify_mode: "CERT_REQUIRED"
+    protocol: "TLSv1_3"
+    check_hostname: true
+  
+  # CORS
+  cors:
+    origins: ["https://yourdomain.com"]
+    credentials: true
+    max_age: 86400
+  
+  # Rate Limiting
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 100
+    burst_size: 20
+
+# Database Configuration
+database:
+  url: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+  pool_size: 20
+  max_overflow: 30
+  pool_timeout: 30
+  pool_recycle: 3600
+  echo: false
+  
+  # Connection Settings
+  connect_args:
+    sslmode: "require"
+    connect_timeout: 10
+
+# Redis Configuration
+redis:
+  url: "redis://:${REDIS_PASSWORD}@${REDIS_HOST}:${REDIS_PORT}/0"
+  socket_timeout: 10
+  socket_connect_timeout: 10
+  retry_on_timeout: true
+  health_check_interval: 30
+  
+  # Connection Pool
+  connection_pool:
+    max_connections: 50
+    retry_on_timeout: true
+
+# Claude Desktop Integration
+claude_desktop:
+  api_url: "${CLAUDE_DESKTOP_API_URL}"
+  api_key: "${CLAUDE_DESKTOP_API_KEY}"
+  webhook_secret: "${CLAUDE_DESKTOP_WEBHOOK_SECRET}"
+  timeout: 30
+  retry_attempts: 3
+  retry_delay: 1
+  
+  # Sync Settings
+  sync:
+    enabled: true
+    interval_seconds: 5
+    batch_size: 100
+    conflict_resolution: "last_write_wins"
+
+# MIS Integration
+mis:
+  memory_path: "${MIS_MEMORY_PATH}"
+  backup_enabled: true
+  backup_interval_seconds: 3600
+  backup_retention_days: 30
+  
+  # Bridge Settings
+  bridge:
+    enabled: true
+    filesystem_root: "/app/data/bridge"
+    project_registry_path: "/app/data/projects.json"
+
+# Monitoring Configuration
+monitoring:
+  enabled: true
+  
+  # Metrics
+  metrics:
+    enabled: true
+    port: 9090
+    path: "/metrics"
+    collection_interval: 10
+    
+    # Exporters
+    exporters:
+      - "system"
+      - "application"
+      - "database"
+      - "redis"
+  
+  # Health Checks
+  health:
+    enabled: true
+    path: "/health"
+    interval_seconds: 30
+    timeout_seconds: 10
+    
+    checks:
+      - "database"
+      - "redis"
+      - "desktop_api"
+      - "filesystem"
+  
+  # Performance Monitoring
+  performance:
+    enabled: true
+    profiling_enabled: false
+    tracing_enabled: true
+    sample_rate: 0.1
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "json"
+  structured: true
+  
+  # File Logging
+  file:
+    enabled: true
+    path: "/app/logs/claude_bridge.log"
+    max_size_mb: 100
+    backup_count: 5
+    rotation: "time"
+    rotation_interval: "midnight"
+  
+  # Console Logging
+  console:
+    enabled: true
+    format: "simple"
+  
+  # Audit Logging
+  audit:
+    enabled: true
+    path: "/app/logs/audit"
+    max_file_size_mb: 100
+    retention_days: 90
+    compress_old_logs: true
+
+# Storage Configuration
+storage:
+  data_directory: "/app/data"
+  backup_directory: "/app/backups"
+  temp_directory: "/tmp/claude_bridge"
+  
+  # Retention Policies
+  retention:
+    data_days: 90
+    logs_days: 30
+    backups_days: 365
+    temp_files_hours: 24
+
+# Security Scanning
+security_scanning:
+  enabled: true
+  
+  # Vulnerability Scanner
+  vulnerability_scanner:
+    enabled: true
+    scan_interval_hours: 24
+    enabled_scanners:
+      - "dependency"
+      - "code_analysis"
+      - "secrets_scan"
+      - "config_analysis"
+    
+    exclude_paths:
+      - ".git"
+      - "__pycache__"
+      - "node_modules"
+      - ".venv"
+      - "venv"
+
+# Performance Configuration
+performance:
+  # Caching
+  cache:
+    enabled: true
+    default_ttl: 3600
+    max_size: 1000
+    strategy: "lru"
+  
+  # Connection Pooling
+  connection_pooling:
+    enabled: true
+    max_pool_size: 50
+    min_pool_size: 5
+    pool_timeout: 30
+  
+  # Async Settings
+  async:
+    max_workers: 10
+    queue_size: 1000
+    batch_size: 100
+
+# Feature Flags
+features:
+  desktop_sync: true
+  mis_integration: true
+  vulnerability_scanner: true
+  performance_monitoring: true
+  audit_logging: true
+  security_scanning: true
+  auto_backup: true
+  metrics_collection: true
+
+# Backup Configuration
+backup:
+  enabled: true
+  interval_hours: 6
+  retention_days: 365
+  compression: true
+  
+  # S3 Backup (optional)
+  s3:
+    enabled: false
+    bucket: "${BACKUP_S3_BUCKET}"
+    region: "${BACKUP_S3_REGION}"
+    prefix: "claude-bridge-backups/"
+    encryption: true
+
+# Notification Configuration
+notifications:
+  # Slack Notifications
+  slack:
+    enabled: false
+    webhook_url: "${SLACK_WEBHOOK_URL}"
+    channel: "#claude-bridge-alerts"
+    username: "Claude Bridge Bot"
+  
+  # Email Notifications
+  email:
+    enabled: false
+    smtp_host: "${EMAIL_SMTP_HOST}"
+    smtp_port: 587
+    username: "${EMAIL_USERNAME}"
+    password: "${EMAIL_PASSWORD}"
+    from_address: "noreply@yourdomain.com"
+    to_addresses:
+      - "admin@yourdomain.com"
+
+# Maintenance Configuration
+maintenance:
+  # Automatic cleanup
+  cleanup:
+    enabled: true
+    interval_hours: 24
+    
+    tasks:
+      - "expired_tokens"
+      - "old_logs"
+      - "temp_files"
+      - "unused_data"
+  
+  # Health monitoring
+  health_monitoring:
+    enabled: true
+    check_interval_minutes: 5
+    alert_threshold_percent: 80

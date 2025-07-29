@@ -22,3 +22,13 @@ python-dotenv>=1.0.0     # 環境変数管理
 websockets>=12.0         # WebSocket通信
 aiofiles>=23.0.0         # 非同期ファイル操作
 watchdog>=4.0.0          # ファイル監視
+
+# Phase 4 Dependencies
+psutil>=5.9.0            # システムメトリクス監視
+aiohttp>=3.8.0           # HTTP非同期クライアント
+types-psutil>=5.9.0      # psutilタイプ定義
+
+# Phase 5 Security Dependencies
+cryptography>=41.0.0     # 暗号化
+PyJWT>=2.8.0            # JWT認証
+bcrypt>=4.0.0           # パスワードハッシュ化
