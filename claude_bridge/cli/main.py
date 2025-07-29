@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..core import BridgeFileSystem, ProjectRegistry, ProjectContextLoader, TaskGenerator
 from ..desktop_api import DesktopConnector, SyncEngine, BridgeProtocol
+from ..mis_integration import MISCommandProcessor, MISMemoryBridge, MISPromptHandler, ContextBridgeSystem
 from ..exceptions import BridgeException
 from .commands import (
     init_command,
@@ -64,6 +65,11 @@ def main(ctx, verbose, quiet, bridge_root):
         desktop_connector = DesktopConnector()
         sync_engine = SyncEngine(bridge_fs, registry, desktop_connector)
         
+        # MIS Integration コンポーネントの初期化
+        mis_memory_bridge = MISMemoryBridge()
+        mis_command_processor = MISCommandProcessor(mis_memory_bridge)
+        context_bridge_system = ContextBridgeSystem(mis_memory_bridge)
+        
         # コンテキストに保存
         ctx.obj['bridge_fs'] = bridge_fs
         ctx.obj['registry'] = registry
@@ -71,6 +77,9 @@ def main(ctx, verbose, quiet, bridge_root):
         ctx.obj['task_generator'] = task_generator
         ctx.obj['desktop_connector'] = desktop_connector
         ctx.obj['sync_engine'] = sync_engine
+        ctx.obj['mis_memory_bridge'] = mis_memory_bridge
+        ctx.obj['mis_command_processor'] = mis_command_processor
+        ctx.obj['context_bridge_system'] = context_bridge_system
         ctx.obj['verbose'] = verbose
         
     except Exception as e:
@@ -458,6 +467,428 @@ def desktop_switch_project(ctx, project_id):
         sys.exit(1)
     except Exception as e:
         click.echo(f"Error: 予期しないエラーが発生しました: {e}", err=True)
+        sys.exit(1)
+
+
+@main.group()
+def mis():
+    """MIS特殊プロンプト連携コマンド"""
+    pass
+
+
+@main.group()
+def context():
+    """双方向コンテキスト転送コマンド"""
+    pass
+
+
+@context.command('desktop-to-code')
+@click.argument('conversation_content', type=str)
+@click.argument('target_project', type=str)
+@click.option('--include-code', is_flag=True, default=True, help='コードスニペットを含める')
+@click.option('--include-history', is_flag=True, default=True, help='履歴を含める')
+@click.option('--output', '-o', type=click.Path(), help='結果出力ファイル')
+@click.pass_context
+def context_desktop_to_code(ctx, conversation_content, target_project, include_code, include_history, output):
+    """Desktop会話コンテキストをCode環境に転送"""
+    try:
+        context_bridge = ctx.obj['context_bridge_system']
+        
+        click.echo(f"Transferring Desktop conversation to Code project: {target_project}")
+        click.echo(f"Content length: {len(conversation_content)} characters")
+        
+        # 転送実行
+        result = context_bridge.transfer_desktop_to_code(
+            conversation_content=conversation_content,
+            target_project=target_project,
+            include_code_snippets=include_code,
+            include_context_history=include_history
+        )
+        
+        # 結果表示
+        if result.success:
+            click.echo(f"✅ Transfer completed successfully!")
+            click.echo(f"Transfer ID: {result.transfer_id}")
+            click.echo(f"Items transferred: {len(result.transferred_items)}")
+            
+            if ctx.obj['verbose']:
+                click.echo("\n📦 Transferred items:")
+                for i, item in enumerate(result.transferred_items, 1):
+                    click.echo(f"  {i}. {item}")
+        else:
+            click.echo(f"❌ Transfer failed: {result.error_message}", err=True)
+            sys.exit(1)
+        
+        # 結果をファイルに出力
+        if output:
+            import json
+            from dataclasses import asdict
+            with open(output, 'w', encoding='utf-8') as f:
+                json.dump(asdict(result), f, ensure_ascii=False, indent=2)
+            click.echo(f"\n💾 Transfer result saved to: {output}")
+        
+    except Exception as e:
+        click.echo(f"Error: Desktop→Code転送に失敗しました: {e}", err=True)
+        sys.exit(1)
+
+
+@context.command('code-to-desktop')
+@click.argument('project_id', type=str)
+@click.option('--include-sessions', is_flag=True, default=True, help='最近のセッションを含める')
+@click.option('--include-status', is_flag=True, default=True, help='プロジェクト状況を含める')
+@click.option('--session-id', help='特定のセッションID')
+@click.option('--output', '-o', type=click.Path(), help='結果出力ファイル')
+@click.pass_context
+def context_code_to_desktop(ctx, project_id, include_sessions, include_status, session_id, output):
+    """Code開発状況をDesktop環境に転送"""
+    try:
+        context_bridge = ctx.obj['context_bridge_system']
+        
+        click.echo(f"Transferring Code development status to Desktop: {project_id}")
+        
+        # 転送実行
+        result = context_bridge.transfer_code_to_desktop(
+            project_id=project_id,
+            include_recent_sessions=include_sessions,
+            include_project_status=include_status,
+            session_id=session_id
+        )
+        
+        # 結果表示
+        if result.success:
+            click.echo(f"✅ Transfer completed successfully!")
+            click.echo(f"Transfer ID: {result.transfer_id}")
+            click.echo(f"Items transferred: {len(result.transferred_items)}")
+            
+            if ctx.obj['verbose']:
+                click.echo("\n📦 Transferred items:")
+                for i, item in enumerate(result.transferred_items, 1):
+                    click.echo(f"  {i}. {item}")
+        else:
+            click.echo(f"❌ Transfer failed: {result.error_message}", err=True)
+            sys.exit(1)
+        
+        # 結果をファイルに出力
+        if output:
+            import json
+            from dataclasses import asdict
+            with open(output, 'w', encoding='utf-8') as f:
+                json.dump(asdict(result), f, ensure_ascii=False, indent=2)
+            click.echo(f"\n💾 Transfer result saved to: {output}")
+        
+    except Exception as e:
+        click.echo(f"Error: Code→Desktop転送に失敗しました: {e}", err=True)
+        sys.exit(1)
+
+
+@context.command('get-for-code')
+@click.argument('project_id', type=str)
+@click.option('--types', help='取得するコンテキスト種別（カンマ区切り）')
+@click.option('--output', '-o', type=click.Path(), help='結果出力ファイル')
+@click.pass_context
+def context_get_for_code(ctx, project_id, types, output):
+    """Code環境向けの関連コンテキストを取得"""
+    try:
+        context_bridge = ctx.obj['context_bridge_system']
+        
+        context_types = types.split(',') if types else None
+        click.echo(f"Getting context for Code session: {project_id}")
+        if context_types:
+            click.echo(f"Context types: {', '.join(context_types)}")
+        
+        # コンテキスト取得
+        context = context_bridge.get_context_for_code_session(project_id, context_types)
+        
+        # 結果表示
+        click.echo(f"\n📋 Context for {project_id}:")
+        click.echo(f"Timestamp: {context['timestamp']}")
+        
+        available_contexts = context.get('available_contexts', {})
+        for context_type, items in available_contexts.items():
+            click.echo(f"\n🔍 {context_type.replace('_', ' ').title()} ({len(items)} items):")
+            for i, item in enumerate(items[:3], 1):  # 最初の3個のみ表示
+                if isinstance(item, dict):
+                    summary = item.get('summary', item.get('content', str(item)))[:100]
+                    timestamp = item.get('timestamp', '')
+                    click.echo(f"  {i}. {summary}{'...' if len(summary) == 100 else ''}")
+                    if timestamp:
+                        click.echo(f"     {timestamp}")
+                else:
+                    click.echo(f"  {i}. {str(item)[:100]}{'...' if len(str(item)) > 100 else ''}")
+            
+            if len(items) > 3:
+                click.echo(f"     ... and {len(items) - 3} more items")
+        
+        if context.get('error'):
+            click.echo(f"\n⚠️  Error: {context['error']}", err=True)
+        
+        # 結果をファイルに出力
+        if output:
+            import json
+            with open(output, 'w', encoding='utf-8') as f:
+                json.dump(context, f, ensure_ascii=False, indent=2)
+            click.echo(f"\n💾 Context saved to: {output}")
+        
+    except Exception as e:
+        click.echo(f"Error: Code向けコンテキスト取得に失敗しました: {e}", err=True)
+        sys.exit(1)
+
+
+@context.command('get-for-desktop')
+@click.option('--project-hint', help='プロジェクトヒント')
+@click.option('--output', '-o', type=click.Path(), help='結果出力ファイル')
+@click.pass_context
+def context_get_for_desktop(ctx, project_hint, output):
+    """Desktop環境向けの関連コンテキストを取得"""
+    try:
+        context_bridge = ctx.obj['context_bridge_system']
+        
+        click.echo("Getting context for Desktop session")
+        if project_hint:
+            click.echo(f"Project hint: {project_hint}")
+        
+        # コンテキスト取得
+        context = context_bridge.get_context_for_desktop_session(project_hint)
+        
+        # 結果表示
+        click.echo(f"\n📋 Context for Desktop session:")
+        click.echo(f"Timestamp: {context['timestamp']}")
+        
+        available_contexts = context.get('available_contexts', {})
+        for context_type, items in available_contexts.items():
+            if context_type == 'active_projects':
+                click.echo(f"\n🚀 Active Projects ({len(items)}):")
+                for project in items:
+                    click.echo(f"  • {project}")
+            else:
+                click.echo(f"\n🔍 {context_type.replace('_', ' ').title()} ({len(items)} items):")
+                for i, item in enumerate(items[:3], 1):  # 最初の3個のみ表示
+                    if isinstance(item, dict):
+                        summary = item.get('summary', item.get('content', str(item)))[:100]
+                        project = item.get('project', '')
+                        timestamp = item.get('timestamp', '')
+                        click.echo(f"  {i}. {summary}{'...' if len(summary) == 100 else ''}")
+                        if project:
+                            click.echo(f"     Project: {project}")
+                        if timestamp:
+                            click.echo(f"     {timestamp}")
+                    else:
+                        click.echo(f"  {i}. {str(item)[:100]}{'...' if len(str(item)) > 100 else ''}")
+                
+                if len(items) > 3:
+                    click.echo(f"     ... and {len(items) - 3} more items")
+        
+        if context.get('error'):
+            click.echo(f"\n⚠️  Error: {context['error']}", err=True)
+        
+        # 結果をファイルに出力
+        if output:
+            import json
+            with open(output, 'w', encoding='utf-8') as f:
+                json.dump(context, f, ensure_ascii=False, indent=2)
+            click.echo(f"\n💾 Context saved to: {output}")
+        
+    except Exception as e:
+        click.echo(f"Error: Desktop向けコンテキスト取得に失敗しました: {e}", err=True)
+        sys.exit(1)
+
+
+@mis.command('process')
+@click.argument('text', type=str)
+@click.option('--project-id', help='プロジェクトID')
+@click.option('--output', '-o', type=click.Path(), help='結果出力ファイル')
+@click.pass_context
+def mis_process(ctx, text, project_id, output):
+    """MIS特殊プロンプトを含むテキストを処理"""
+    try:
+        mis_processor = ctx.obj['mis_command_processor']
+        
+        click.echo("Processing MIS prompts...")
+        result = mis_processor.process_conversation(text, project_id)
+        
+        # 結果を表示
+        click.echo(f"\n🔍 Processing Results:")
+        click.echo(f"Status: {result['status']}")
+        click.echo(f"Detected prompts: {result['detected_prompts']}")
+        click.echo(f"Processed prompts: {result['processed_prompts']}")
+        
+        if result.get('failed_prompts', 0) > 0:
+            click.echo(f"Failed prompts: {result['failed_prompts']}", fg='red')
+        
+        # Desktop アクションがある場合は表示
+        if result.get('desktop_actions'):
+            click.echo(f"\n📡 Desktop Actions ({len(result['desktop_actions'])}):")
+            for i, action in enumerate(result['desktop_actions'], 1):
+                click.echo(f"  {i}. {action['type']}")
+        
+        # 詳細を表示（verbose モード）
+        if ctx.obj['verbose'] and result.get('processing_results'):
+            click.echo(f"\n📋 Detailed Results:")
+            for i, proc_result in enumerate(result['processing_results'], 1):
+                click.echo(f"  {i}. {proc_result['prompt_type']}")
+                click.echo(f"     Content: {proc_result['content'][:50]}...")
+                if proc_result.get('memory_operation'):
+                    mem_op = proc_result['memory_operation']
+                    if mem_op['success']:
+                        click.echo(f"     Memory: {mem_op['operation']} ✅")
+                    else:
+                        click.echo(f"     Memory: {mem_op['operation']} ❌")
+        
+        # 結果をファイルに出力
+        if output:
+            import json
+            with open(output, 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+            click.echo(f"\n💾 Results saved to: {output}")
+        
+    except Exception as e:
+        click.echo(f"Error: MIS処理に失敗しました: {e}", err=True)
+        sys.exit(1)
+
+
+@mis.command('memory')
+@click.argument('action', type=click.Choice(['save', 'recall', 'stats', 'export']))
+@click.argument('content_or_query', type=str, required=False)
+@click.option('--project-id', help='プロジェクトID')
+@click.option('--tags', help='タグ（カンマ区切り）')
+@click.option('--format', 'export_format', type=click.Choice(['json', 'csv', 'markdown']), 
+              default='json', help='エクスポート形式')
+@click.option('--output', '-o', type=click.Path(), help='出力ファイル')
+@click.pass_context
+def mis_memory(ctx, action, content_or_query, project_id, tags, export_format, output):
+    """MIS記憶システムの操作"""
+    try:
+        mis_bridge = ctx.obj['mis_memory_bridge']
+        
+        if action == 'save':
+            if not content_or_query:
+                click.echo("Error: 保存する内容を指定してください", err=True)
+                sys.exit(1)
+            
+            tag_list = tags.split(',') if tags else []
+            memory_id = mis_bridge.save_memory(
+                content=content_or_query,
+                tags=tag_list,
+                project_id=project_id,
+                entry_type="cli_save"
+            )
+            
+            click.echo(f"✅ Memory saved with ID: {memory_id}")
+            if tag_list:
+                click.echo(f"   Tags: {', '.join(tag_list)}")
+            if project_id:
+                click.echo(f"   Project: {project_id}")
+        
+        elif action == 'recall':
+            if not content_or_query:
+                click.echo("Error: 検索クエリを指定してください", err=True)
+                sys.exit(1)
+            
+            from ..mis_integration.mis_memory_bridge import MISMemoryQuery
+            query = MISMemoryQuery(
+                query=content_or_query,
+                max_results=10,
+                project_id=project_id,
+                tags=tags.split(',') if tags else None
+            )
+            
+            memories = mis_bridge.recall_memory(query)
+            
+            click.echo(f"🔍 Found {len(memories)} memories:")
+            for i, memory in enumerate(memories, 1):
+                click.echo(f"\n{i}. {memory.id}")
+                click.echo(f"   Type: {memory.entry_type}")
+                click.echo(f"   Time: {memory.timestamp}")
+                if memory.tags:
+                    click.echo(f"   Tags: {', '.join(memory.tags)}")
+                if memory.project_id:
+                    click.echo(f"   Project: {memory.project_id}")
+                
+                # コンテンツの最初の200文字を表示
+                content_preview = memory.content[:200]
+                if len(memory.content) > 200:
+                    content_preview += "..."
+                click.echo(f"   Content: {content_preview}")
+        
+        elif action == 'stats':
+            stats = mis_bridge.get_memory_stats()
+            
+            click.echo("📊 MIS Memory Statistics:")
+            click.echo(f"Total memories: {stats['total_memories']}")
+            
+            if stats['type_distribution']:
+                click.echo(f"\nType distribution:")
+                for mem_type, count in stats['type_distribution'].items():
+                    click.echo(f"  {mem_type}: {count}")
+            
+            if stats['tag_distribution']:
+                click.echo(f"\nTop tags:")
+                sorted_tags = sorted(stats['tag_distribution'].items(), 
+                                   key=lambda x: x[1], reverse=True)[:10]
+                for tag, count in sorted_tags:
+                    click.echo(f"  {tag}: {count}")
+            
+            if stats['project_distribution']:
+                click.echo(f"\nProject distribution:")
+                for project, count in stats['project_distribution'].items():
+                    click.echo(f"  {project}: {count}")
+            
+            if stats['latest_memory']:
+                click.echo(f"\nLatest memory: {stats['latest_memory']}")
+            if stats['oldest_memory']:
+                click.echo(f"Oldest memory: {stats['oldest_memory']}")
+            
+            file_size = stats.get('memory_file_size', 0)
+            click.echo(f"Memory file size: {file_size:,} bytes")
+        
+        elif action == 'export':
+            if not output:
+                output = f"mis_memory_export.{export_format}"
+            
+            success = mis_bridge.export_memories(Path(output), export_format)
+            
+            if success:
+                click.echo(f"✅ Memories exported to: {output}")
+            else:
+                click.echo(f"❌ Export failed", err=True)
+                sys.exit(1)
+        
+    except Exception as e:
+        click.echo(f"Error: MIS記憶操作に失敗しました: {e}", err=True)
+        sys.exit(1)
+
+
+@mis.command('detect')
+@click.argument('text', type=str)
+@click.pass_context
+def mis_detect(ctx, text):
+    """テキスト内のMIS特殊プロンプトを検出"""
+    try:
+        mis_processor = ctx.obj['mis_command_processor']
+        detected_prompts = mis_processor.prompt_handler.detect_mis_prompts(text)
+        
+        if not detected_prompts:
+            click.echo("MIS特殊プロンプトは検出されませんでした")
+            return
+        
+        click.echo(f"🔍 Detected {len(detected_prompts)} MIS prompts:")
+        
+        for i, (prompt_type, content) in enumerate(detected_prompts, 1):
+            click.echo(f"\n{i}. {prompt_type.value}")
+            click.echo(f"   Content: {content[:100]}{'...' if len(content) > 100 else ''}")
+            
+            # プロンプトの種類に応じた説明
+            if prompt_type.value == "mis_memory_save":
+                click.echo("   Action: 記憶を保存します")
+            elif prompt_type.value == "mis_memory_recall":
+                click.echo("   Action: 記憶を検索・呼び出します")
+            elif prompt_type.value == "mis_spec_update":
+                click.echo("   Action: 仕様を更新します")
+            elif prompt_type.value == "mis_context_share":
+                click.echo("   Action: コンテキストを共有します")
+        
+    except Exception as e:
+        click.echo(f"Error: MIS検出に失敗しました: {e}", err=True)
         sys.exit(1)
 
 
