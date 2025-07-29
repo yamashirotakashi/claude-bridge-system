@@ -12,9 +12,19 @@ __author__ = "Claude Bridge Development Team"
 from .core.bridge_filesystem import BridgeFileSystem
 from .core.project_registry import ProjectRegistry
 from .core.project_context_loader import ProjectContextLoader
+from .core.task_generator import TaskGenerator
+from .desktop_api.desktop_connector import DesktopConnector
+from .desktop_api.sync_engine import SyncEngine
+from .desktop_api.bridge_protocol import BridgeProtocol, MessageType, BridgeMessage
 
 __all__ = [
     "BridgeFileSystem",
     "ProjectRegistry",
-    "ProjectContextLoader"
+    "ProjectContextLoader", 
+    "TaskGenerator",
+    "DesktopConnector",
+    "SyncEngine", 
+    "BridgeProtocol",
+    "MessageType",
+    "BridgeMessage"
 ]

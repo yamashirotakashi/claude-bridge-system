@@ -1,0 +1,12 @@
+#!/bin/bash
+# Claude Bridge System - CLI Wrapper
+# Usage: ./bridge [command] [options]
+
+# Get script directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
+# Activate virtual environment
+source "$SCRIPT_DIR/venv/bin/activate"
+
+# Run the CLI module
+python -m claude_bridge.cli.main "$@"

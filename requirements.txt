@@ -17,3 +17,8 @@ flake8>=6.0.0            # リント
 # Optional Dependencies
 pyyaml>=6.0.0            # YAML設定ファイル
 python-dotenv>=1.0.0     # 環境変数管理
+
+# Phase 3 Dependencies
+websockets>=12.0         # WebSocket通信
+aiofiles>=23.0.0         # 非同期ファイル操作
+watchdog>=4.0.0          # ファイル監視

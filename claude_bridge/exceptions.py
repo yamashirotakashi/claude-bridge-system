@@ -42,7 +42,11 @@ class ValidationError(BridgeException):
 
 class TaskGenerationError(BridgeException):
     """タスク生成関連エラー"""
-    pass
+    
+    def __init__(self, message: str, details: Optional[str] = None, 
+                 conversation_content: Optional[str] = None):
+        super().__init__(message, details)
+        self.conversation_content = conversation_content
 
 
 class PermissionError(BridgeException):
