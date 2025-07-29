@@ -1,0 +1,19 @@
+# Claude Bridge System Requirements
+# Phase 1: MVP実装
+
+# Core Dependencies
+watchdog>=3.0.0          # ファイル監視
+pydantic>=2.0.0          # データ検証
+click>=8.0.0             # CLI作成
+pathlib>=1.0.0           # パス操作（標準ライブラリ）
+
+# Development Dependencies
+pytest>=7.0.0            # テスト
+pytest-cov>=4.0.0        # カバレッジ
+black>=23.0.0            # コードフォーマット
+mypy>=1.0.0              # 型チェック
+flake8>=6.0.0            # リント
+
+# Optional Dependencies
+pyyaml>=6.0.0            # YAML設定ファイル
+python-dotenv>=1.0.0     # 環境変数管理
